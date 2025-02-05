@@ -1,0 +1,99 @@
+/**
+ * Closes Tanium vulnerabilities that have not been detected for 90 days or more.
+ * This function updates the state to 'Closed' and substate to 'Stale'.
+ * 
+ * @daysToCheck {number} days - The number of days after which a vulnerability is considered stale (set to 90).
+ */
+function closeStaleTaniumVulnerabilities(days) {
+    // Log entry into function for debugging
+    gs.info("Debug: Entering closeStaleTaniumVulnerabilities function");
+    
+    // Define the threshold for considering a vulnerability as stale
+    var daysToCheck = 90;
+    var lastFoundBefore = new GlideDate();
+    // Calculate the date XXX days ago from now
+    lastFoundBefore.addDaysUTC(-daysToCheck);
+
+    // Toggle for enabling/disabling error logging
+    var enableErrorLogging = true; // Set to false to disable error logging
+
+    // Log the start of the script execution with a timestamp
+    var startTimer = new GlideDateTime();
+    gs.info("Scheduled Job Auto-Close Stale Tanium Vulnerable Items Execution Started : " + startTimer.getDisplayValue());
+
+    // Setup query for vulnerable items from Tanium integration
+    var vi = new GlideRecord("sn_vul_vulnerable_item");
+    // Construct encoded query:
+    // - Filter for items from specific Tanium integration
+    // - Only active vulnerabilities
+    // - Last found date is older than 90 days ago
+    try {
+        //vi.addEncodedQuery("integration_instanceISEMPTY^active=true^last_found<" + lastFoundBefore); To clean up EMPTY entries
+		vi.addEncodedQuery("integration_instanceIN<your_tanium_instance_id>^active=true^last_found<" + lastFoundBefore);
+        // Log if query construction was successful
+        gs.info("Debug: Query constructed successfully");
+        // Use orderBy instead of setSortField which isn't recognized in this context
+        vi.orderBy("sys_id");
+        vi.query();
+    } catch (e) {
+        if (enableErrorLogging) {
+            gs.error("Failed to construct or execute query: " + e.message);
+        }
+        return; // Exit function if query setup fails
+    }
+
+    // Initialize counter for tracking processed records
+    var processedCount = 0;
+    var errorCount = 0; // Counter for errors during processing
+
+    // Log to a custom log for additional debugging (Note: Use gs.info here as well)
+    gs.info("Debug: Starting to process records");
+
+    // Iterate through all matching records
+    while (vi.hasNext()) {
+        try {
+            if (!vi.next()) {
+                throw new Error("Unexpected end of record iteration");
+            }
+
+            // Set the state of the vulnerability to 'Closed'
+            // Hardcoded values assuming these are the correct values for your instance
+            vi.setValue("state", "3");
+            // Set the substate to 'Stale' to indicate why it was closed
+            vi.setValue("substate", "6");
+            // Attach a note to the record explaining the closure
+            vi.close_notes = "Closed due to inactivity for " + daysToCheck + " days.";
+            // Update the record in ServiceNow
+            vi.update();
+            
+            // Log the successful closure of this specific vulnerability item
+            gs.info("Successfully closed vulnerability item with ID: " + vi.sys_id);
+            processedCount++;
+        } catch (e) {
+            // If an error occurs during the update, log it for troubleshooting if enabled
+            if (enableErrorLogging) {
+                gs.error("Failed to process vulnerability item with ID " + vi.sys_id + ". Error: " + e.message);
+            }
+            errorCount++;
+        }
+    }
+
+    // Log the end of the script execution with a timestamp
+    var endTimer = new GlideDateTime();
+    gs.info("Scheduled Job Auto-Close Stale Tanium Vulnerable Items Execution Finished : " + endTimer.getDisplayValue());
+    // Log summary of execution including errors
+    gs.info("Processed " + processedCount + " vulnerable items from Tanium integration. Encountered " + errorCount + " errors.");
+    gs.info("Debug: Processed " + processedCount + " items, errors: " + errorCount);
+
+    // Check if there were too many errors (you can adjust this threshold)
+    if (errorCount > 10 && enableErrorLogging) { // Example threshold
+        gs.warn("High number of errors detected. Please review the job execution.");
+        // Optionally, you might want to send an email or trigger an alert here
+    }
+
+    // Final debug log to ensure the script completed
+    gs.info("Debug: Script execution completed");
+}
+
+// Example call if you're directly executing in background script
+closeStaleTaniumVulnerabilities(600);
