@@ -1,0 +1,153 @@
+(function executeRule(current, previous /*null when async*/) {
+
+    // Function to parse comma-separated data
+    function parseCommaSeparated(data) {
+        var pairs = [];
+        var currentPair = '';
+        var insideQuotes = false;
+
+        for (var i = 0; i < data.length; i++) {
+            var character = data[i];
+            if (character === '"') {
+                insideQuotes = !insideQuotes;
+                currentPair += character;
+            } else if (character === ',' && !insideQuotes) {
+                pairs.push(currentPair.trim());
+                currentPair = '';
+            } else {
+                currentPair += character;
+            }
+        }
+        if (currentPair) {
+            pairs.push(currentPair.trim());
+        }
+
+        var formattedPairs = [];
+        for (var j = 0; j < pairs.length; j++) {
+            var pair = pairs[j];
+            var indexOfEquals = pair.indexOf('=');
+            if (indexOfEquals !== -1) {
+                var name = pair.substring(0, indexOfEquals).trim();
+                var value = pair.substring(indexOfEquals + 1).trim();
+                if (value.startsWith('"') && value.endsWith('"')) {
+                    value = value.substring(1, value.length - 1);
+                }
+                formattedPairs.push(name.charAt(0).toUpperCase() + name.slice(1) + ': ' + value);
+            } else {
+                formattedPairs.push(pair);
+            }
+        }
+        return formattedPairs.join('\n\n');
+    }
+
+    // Get the description field value
+    var raw = current.getValue('description') || '';
+
+    // Check if raw data exists
+    if (!raw) {
+        current.description = 'N/A';
+    } else {
+        // Declare all variables once at the top of the scope
+        var lines = raw.split('\n');
+        var filteredLines = [];
+        var rawDataContent, origRawContent, drilldownContent;
+        var rawDataFormatted = '', origRawFormatted = '', drilldownFormatted = '';
+        var jsonData, jsonObject, jsonPairs, formattedKey, key;
+
+        // Process each line
+        for (var k = 0; k < lines.length; k++) {
+            var line = lines[k].trim();
+
+            // Skip empty lines
+            if (!line) continue;
+
+            // Check if line is a structured section to parse
+            if (line === 'RAW Data:') {
+                // Extract and parse RAW Data section
+                rawDataContent = '';
+                k++; // Move to next line
+                while (k < lines.length && lines[k].trim() && !lines[k].startsWith('Orig Raw:') && !lines[k].startsWith('Drilldown_searches:')) {
+                    rawDataContent += lines[k] + '\n';
+                    k++;
+                }
+                k--; // Step back one line
+                if (rawDataContent.trim()) {
+                    rawDataFormatted = 'RAW Data:\n' + parseCommaSeparated(rawDataContent.trim());
+                    filteredLines.push(rawDataFormatted);
+                }
+            } else if (line === 'Orig Raw:') {
+                // Extract and parse Orig Raw section
+                origRawContent = '';
+                k++; // Move to next line
+                while (k < lines.length && lines[k].trim()) {
+                    origRawContent += lines[k] + '\n';
+                    k++;
+                }
+                k--; // Step back one line
+                if (origRawContent.trim()) {
+                    try {
+                        jsonData = JSON.parse(origRawContent.trim());
+                        if (Array.isArray(jsonData) && jsonData.length > 0) {
+                            jsonObject = jsonData[0];
+                            jsonPairs = [];
+                            for (key in jsonObject) {
+                                if (jsonObject.hasOwnProperty(key)) {
+                                    formattedKey = key.charAt(0).toUpperCase() + key.slice(1);
+                                    jsonPairs.push(formattedKey + ': ' + jsonObject[key]);
+                                }
+                            }
+                            origRawFormatted = 'Orig Raw:\n' + jsonPairs.join('\n\n');
+                            filteredLines.push(origRawFormatted);
+                        } else {
+                            origRawFormatted = 'Orig Raw:\n' + parseCommaSeparated(origRawContent.trim());
+                            filteredLines.push(origRawFormatted);
+                        }
+                    } catch (e) {
+                        origRawFormatted = 'Orig Raw:\n' + parseCommaSeparated(origRawContent.trim());
+                        filteredLines.push(origRawFormatted);
+                    }
+                }
+            } else if (line.startsWith('Drilldown_searches:')) {
+                // Extract and parse Drilldown_searches section
+                drilldownContent = line.substring('Drilldown_searches:'.length).trim();
+                if (drilldownContent) {
+                    try {
+                        jsonData = JSON.parse(drilldownContent);
+                        if (Array.isArray(jsonData) && jsonData.length > 0) {
+                            jsonObject = jsonData[0];
+                            jsonPairs = [];
+                            for (key in jsonObject) {
+                                if (jsonObject.hasOwnProperty(key)) {
+                                    formattedKey = key.charAt(0).toUpperCase() + key.slice(1);
+                                    jsonPairs.push(formattedKey + ': ' + jsonObject[key]);
+                                }
+                            }
+                            drilldownFormatted = 'Drilldown_searches:\n' + jsonPairs.join('\n\n');
+                            filteredLines.push(drilldownFormatted);
+                        }
+                    } catch (e) {
+                        filteredLines.push(line); // Keep as-is if not JSON
+                    }
+                }
+            } else {
+                // Filter out lines with no data after the label
+                var parts = line.split(':');
+                if (parts.length > 1) {
+                    var value = parts.slice(1).join(':').trim(); // Join back in case value contains ':'
+                    if (value) { // Only keep lines with non-empty values
+                        filteredLines.push(line);
+                    }
+                } else {
+                    filteredLines.push(line); // Keep lines without ':' (unlikely)
+                }
+            }
+        }
+
+        // Join filtered lines with single newlines to maintain original spacing
+        current.description = filteredLines.length > 0 ? filteredLines.join('\n') : 'No data found';
+    }
+
+    // Update the record
+    current.update();
+
+})(current, previous);
